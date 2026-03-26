@@ -1,173 +1,135 @@
 #!/bin/bash
-# RustChain Founding Miner - API Test Script
-# Issue: #2451 (~75 RTC)
+# Rent-a-Relic Market - API 测试脚本
+# RustChain Bounty #2312
 
-set -e
-
-BASE_URL="${BASE_URL:-http://localhost:8080}"
+BASE_URL="${BASE_URL:-http://localhost}"
 TOKEN=""
 
-echo "=========================================="
-echo "RustChain Founding Miner - API Tests"
-echo "Base URL: $BASE_URL"
-echo "=========================================="
-echo ""
+echo "========================================="
+echo "Rent-a-Relic Market API 测试"
+echo "========================================="
 
-# Color codes
+# 颜色定义
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-pass() {
-    echo -e "${GREEN}✓ PASS${NC}: $1"
-}
-
-fail() {
-    echo -e "${RED}✗ FAIL${NC}: $1"
-    exit 1
-}
-
-info() {
-    echo -e "${YELLOW}→${NC} $1"
-}
-
-# Test 1: Health Check
-info "Testing health check..."
-RESPONSE=$(curl -s "$BASE_URL/api/health")
-if echo "$RESPONSE" | grep -q '"status":"healthy"'; then
-    pass "Health check passed"
-else
-    fail "Health check failed: $RESPONSE"
-fi
-echo ""
-
-# Test 2: Register User 1
-info "Registering user: founding_miner_1..."
-RESPONSE=$(curl -s -X POST "$BASE_URL/api/register" \
-    -H "Content-Type: application/json" \
-    -d '{
-        "username": "founding_miner_1",
-        "password": "password123",
-        "wallet_address": "RTC1TestWallet1Address123456789",
-        "miner_name": "Test Miner Alpha"
-    }')
-
-if echo "$RESPONSE" | grep -q '"message":"Registration successful"'; then
-    pass "User registration successful"
-    TOKEN=$(echo "$RESPONSE" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
-    info "Token received: ${TOKEN:0:20}..."
-else
-    # Might already exist
-    if echo "$RESPONSE" | grep -q "already exists"; then
-        info "User already exists, logging in..."
-        LOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/login" \
+# 测试函数
+test_api() {
+    local name=$1
+    local method=$2
+    local endpoint=$3
+    local data=$4
+    
+    echo -e "\n${YELLOW}测试：${name}${NC}"
+    
+    if [ -n "$data" ]; then
+        response=$(curl -s -w "\n%{http_code}" -X "$method" "$BASE_URL$endpoint" \
             -H "Content-Type: application/json" \
-            -d '{"username": "founding_miner_1", "password": "password123"}')
-        TOKEN=$(echo "$LOGIN_RESPONSE" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
-        pass "Login successful"
+            -H "Authorization: Bearer $TOKEN" \
+            -d "$data")
     else
-        fail "Registration failed: $RESPONSE"
+        response=$(curl -s -w "\n%{http_code}" -X "$method" "$BASE_URL$endpoint" \
+            -H "Authorization: Bearer $TOKEN")
     fi
-fi
-echo ""
+    
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | head -n-1)
+    
+    if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+        echo -e "${GREEN}✓ 成功 (HTTP $http_code)${NC}"
+        echo "$body" | jq . 2>/dev/null || echo "$body"
+    else
+        echo -e "${RED}✗ 失败 (HTTP $http_code)${NC}"
+        echo "$body"
+    fi
+    
+    return $http_code
+}
 
-# Test 3: Get Miner Stats
-info "Testing miner stats..."
-RESPONSE=$(curl -s "$BASE_URL/api/miner/stats" \
-    -H "Authorization: Bearer $TOKEN")
-if echo "$RESPONSE" | grep -q '"total_rewards"'; then
-    pass "Miner stats retrieved"
-    echo "Response: $RESPONSE" | head -c 200
-    echo "..."
+# 1. 健康检查
+echo -e "\n=== 1. 健康检查 ==="
+test_api "健康检查" "GET" "/health"
+
+# 2. 获取统计数据
+echo -e "\n=== 2. 平台统计 ==="
+test_api "获取统计数据" "GET" "/api/stats"
+
+# 3. 获取物品列表
+echo -e "\n=== 3. 物品列表 ==="
+test_api "获取物品列表" "GET" "/api/relics"
+
+# 4. 获取单个物品
+echo -e "\n=== 4. 单个物品 ==="
+test_api "获取物品 #1" "GET" "/api/relics/1"
+
+# 5. 用户注册
+echo -e "\n=== 5. 用户注册 ==="
+test_api "注册测试用户" "POST" "/api/auth/register" \
+    '{"username":"test_user_'$$'","email":"test'$$$'@example.com","password":"test123"}'
+
+# 6. 用户登录
+echo -e "\n=== 6. 用户登录 ==="
+login_response=$(curl -s -X POST "$BASE_URL/api/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"username":"ancient_collector","password":"password123"}')
+
+TOKEN=$(echo "$login_response" | jq -r '.token' 2>/dev/null)
+
+if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+    echo -e "${GREEN}✓ 登录成功，Token 已获取${NC}"
+    echo "Token: ${TOKEN:0:20}..."
 else
-    fail "Miner stats failed: $RESPONSE"
+    echo -e "${RED}✗ 登录失败${NC}"
+    echo "$login_response"
 fi
-echo ""
 
-# Test 4: Start Mining Session
-info "Starting mining session..."
-RESPONSE=$(curl -s -X POST "$BASE_URL/api/miner/sessions" \
+# 7. 获取用户信息
+echo -e "\n=== 7. 用户信息 ==="
+test_api "获取当前用户" "GET" "/api/users/me"
+
+# 8. 创建新物品
+echo -e "\n=== 8. 创建物品 ==="
+create_response=$(curl -s -X POST "$BASE_URL/api/relics" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $TOKEN" \
-    -d '{"miner_name": "Test Session 1"}')
-if echo "$RESPONSE" | grep -q '"message":"Mining session started"'; then
-    pass "Mining session started"
-    SESSION_ID=$(echo "$RESPONSE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
-    info "Session ID: $SESSION_ID"
+    -d '{
+        "name": "Test Relic - Golden Coin",
+        "description": "A test golden coin from ancient times",
+        "category": "Ancient Artifacts",
+        "daily_rate": 25.00,
+        "deposit_amount": 250.00,
+        "condition": "excellent"
+    }')
+
+echo "$create_response" | jq . 2>/dev/null || echo "$create_response"
+relic_id=$(echo "$create_response" | jq -r '.relic.id' 2>/dev/null)
+
+if [ -n "$relic_id" ] && [ "$relic_id" != "null" ]; then
+    echo -e "${GREEN}✓ 物品创建成功，ID: $relic_id${NC}"
 else
-    fail "Start session failed: $RESPONSE"
-fi
-echo ""
-
-# Test 5: End Mining Session
-if [ -n "$SESSION_ID" ]; then
-    info "Ending mining session $SESSION_ID..."
-    RESPONSE=$(curl -s -X POST "$BASE_URL/api/miner/sessions/$SESSION_ID/end" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $TOKEN" \
-        -d '{"blocks_found": 3, "rewards_earned": 90.5}')
-    if echo "$RESPONSE" | grep -q '"message":"Mining session ended"'; then
-        pass "Mining session ended with rewards"
-    else
-        fail "End session failed: $RESPONSE"
-    fi
-    echo ""
+    echo -e "${YELLOW}⚠ 物品可能已存在或使用默认物品测试${NC}"
+    relic_id=1
 fi
 
-# Test 6: Get Rewards
-info "Testing rewards history..."
-RESPONSE=$(curl -s "$BASE_URL/api/rewards" \
-    -H "Authorization: Bearer $TOKEN")
-if echo "$RESPONSE" | grep -q '"rewards"'; then
-    pass "Rewards history retrieved"
-else
-    fail "Rewards failed: $RESPONSE"
-fi
-echo ""
+# 9. 预订物品
+echo -e "\n=== 9. 预订物品 ==="
+test_api "预订物品 #$relic_id" "POST" "/api/relics/$relic_id/rent" \
+    '{"start_date":"2026-04-01","end_date":"2026-04-07"}'
 
-# Test 7: Get Leaderboard
-info "Testing leaderboard..."
-RESPONSE=$(curl -s "$BASE_URL/api/leaderboard?limit=10")
-if echo "$RESPONSE" | grep -q '"leaderboard"'; then
-    pass "Leaderboard retrieved"
-else
-    fail "Leaderboard failed: $RESPONSE"
-fi
-echo ""
+# 10. 获取租赁记录
+echo -e "\n=== 10. 租赁记录 ==="
+test_api "获取我的租赁" "GET" "/api/rentals?type=renting"
 
-# Test 8: Get Mining Sessions
-info "Testing mining sessions..."
-RESPONSE=$(curl -s "$BASE_URL/api/miner/sessions" \
-    -H "Authorization: Bearer $TOKEN")
-if echo "$RESPONSE" | grep -q '"sessions"'; then
-    pass "Mining sessions retrieved"
-else
-    fail "Sessions failed: $RESPONSE"
-fi
-echo ""
+# 11. 按分类筛选
+echo -e "\n=== 11. 分类筛选 ==="
+test_api "筛选古代文物" "GET" "/api/relics?category=Ancient%20Artifacts"
 
-# Test 9: Test Invalid Token
-info "Testing authentication (invalid token)..."
-RESPONSE=$(curl -s "$BASE_URL/api/miner/stats" \
-    -H "Authorization: Bearer invalid_token")
-if echo "$RESPONSE" | grep -q "Invalid token"; then
-    pass "Invalid token rejected correctly"
-else
-    fail "Invalid token not rejected: $RESPONSE"
-fi
-echo ""
+# 12. 按状态筛选
+echo -e "\n=== 12. 状态筛选 ==="
+test_api "筛选可用物品" "GET" "/api/relics?status=available"
 
-# Test 10: Test Missing Token
-info "Testing authentication (missing token)..."
-RESPONSE=$(curl -s "$BASE_URL/api/miner/stats")
-if echo "$RESPONSE" | grep -q "Token is missing"; then
-    pass "Missing token rejected correctly"
-else
-    fail "Missing token not rejected: $RESPONSE"
-fi
-echo ""
-
-echo "=========================================="
-echo -e "${GREEN}All tests completed successfully!${NC}"
-echo "=========================================="
+echo -e "\n========================================="
+echo -e "${GREEN}所有测试完成！${NC}"
+echo "========================================="
