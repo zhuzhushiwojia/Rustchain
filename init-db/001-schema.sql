@@ -1,98 +1,127 @@
--- RustChain Founding Miner Database Schema
--- Issue: #2451 (~75 RTC)
+-- Rent-a-Relic Market Database Schema
+-- RustChain Bounty #2312
 
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- Users table (miners)
+-- Users table
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
-    username VARCHAR(100) UNIQUE NOT NULL,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(64) NOT NULL,
-    wallet_address VARCHAR(255),
-    miner_name VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    last_login TIMESTAMP WITH TIME ZONE,
-    is_active BOOLEAN DEFAULT TRUE
+    role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('user', 'admin', 'moderator')),
+    avatar_url TEXT,
+    bio TEXT,
+    rating DECIMAL(3,2) DEFAULT 5.00,
+    total_rentals INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Mining sessions table
-CREATE TABLE IF NOT EXISTS mining_sessions (
+-- API tokens for authentication
+CREATE TABLE IF NOT EXISTS api_tokens (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    miner_name VARCHAR(255) NOT NULL,
-    start_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    end_time TIMESTAMP WITH TIME ZONE,
-    blocks_found INTEGER DEFAULT 0,
-    rewards_earned DECIMAL(18, 8) DEFAULT 0,
-    status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'completed', 'failed')),
-    metadata JSONB DEFAULT '{}'::jsonb
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) UNIQUE NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Rewards table
-CREATE TABLE IF NOT EXISTS rewards (
+-- Relics (rental items) table
+CREATE TABLE IF NOT EXISTS relics (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    session_id INTEGER REFERENCES mining_sessions(id) ON DELETE SET NULL,
-    amount DECIMAL(18, 8) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    notes TEXT
+    owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    category VARCHAR(50) NOT NULL,
+    daily_rate DECIMAL(10,2) NOT NULL,
+    deposit_amount DECIMAL(10,2) NOT NULL,
+    condition VARCHAR(20) DEFAULT 'good' CHECK (condition IN ('excellent', 'good', 'fair', 'poor')),
+    images TEXT[], -- Array of image URLs
+    availability_start DATE,
+    availability_end DATE,
+    status VARCHAR(20) DEFAULT 'available' CHECK (status IN ('available', 'rented', 'maintenance', 'retired')),
+    location VARCHAR(255),
+    shipping_available BOOLEAN DEFAULT false,
+    rating DECIMAL(3,2) DEFAULT 5.00,
+    total_rentals INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Withdrawals table
-CREATE TABLE IF NOT EXISTS withdrawals (
+-- Rentals table
+CREATE TABLE IF NOT EXISTS rentals (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    amount DECIMAL(18, 8) NOT NULL,
-    wallet_address VARCHAR(255) NOT NULL,
-    status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'cancelled')),
-    tx_hash VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    processed_at TIMESTAMP WITH TIME ZONE,
-    notes TEXT
+    relic_id INTEGER REFERENCES relics(id) ON DELETE CASCADE,
+    renter_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    total_cost DECIMAL(10,2) NOT NULL,
+    deposit_amount DECIMAL(10,2) NOT NULL,
+    deposit_returned BOOLEAN DEFAULT false,
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'active', 'completed', 'cancelled', 'disputed')),
+    payment_status VARCHAR(20) DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'refunded', 'partial')),
+    shipping_address TEXT,
+    return_tracking VARCHAR(255),
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Mining pool stats (for admin/dashboard)
-CREATE TABLE IF NOT EXISTS pool_stats (
+-- Reviews table
+CREATE TABLE IF NOT EXISTS reviews (
     id SERIAL PRIMARY KEY,
-    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    total_miners INTEGER DEFAULT 0,
-    active_sessions INTEGER DEFAULT 0,
-    total_hashrate DECIMAL(18, 2) DEFAULT 0,
-    blocks_found_24h INTEGER DEFAULT 0,
-    rewards_distributed_24h DECIMAL(18, 8) DEFAULT 0
+    rental_id INTEGER REFERENCES rentals(id) ON DELETE CASCADE,
+    reviewer_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    reviewee_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+    comment TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Categories table (for standardized categories)
+CREATE TABLE IF NOT EXISTS categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) UNIQUE NOT NULL,
+    description TEXT,
+    parent_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Create indexes for performance
+CREATE INDEX IF NOT EXISTS idx_relics_owner ON relics(owner_id);
+CREATE INDEX IF NOT EXISTS idx_relics_category ON relics(category);
+CREATE INDEX IF NOT EXISTS idx_relics_status ON relics(status);
+CREATE INDEX IF NOT EXISTS idx_rentals_relic ON rentals(relic_id);
+CREATE INDEX IF NOT EXISTS idx_rentals_renter ON rentals(renter_id);
+CREATE INDEX IF NOT EXISTS idx_rentals_owner ON rentals(owner_id);
+CREATE INDEX IF NOT EXISTS idx_rentals_status ON rentals(status);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
-CREATE INDEX IF NOT EXISTS idx_mining_sessions_user_id ON mining_sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_mining_sessions_status ON mining_sessions(status);
-CREATE INDEX IF NOT EXISTS idx_mining_sessions_start_time ON mining_sessions(start_time);
-CREATE INDEX IF NOT EXISTS idx_rewards_user_id ON rewards(user_id);
-CREATE INDEX IF NOT EXISTS idx_rewards_created_at ON rewards(created_at);
-CREATE INDEX IF NOT EXISTS idx_withdrawals_user_id ON withdrawals(user_id);
-CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON withdrawals(status);
-CREATE INDEX IF NOT EXISTS idx_pool_stats_timestamp ON pool_stats(timestamp);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+-- Insert default categories
+INSERT INTO categories (name, description) VALUES
+    ('Ancient Artifacts', 'Items from ancient civilizations'),
+    ('Medieval Relics', 'Artifacts from the medieval period'),
+    ('Victorian Era', 'Items from the Victorian period'),
+    ('Art Deco', 'Decorative arts from 1920s-1930s'),
+    ('Vintage Technology', 'Historic technological devices'),
+    ('Collectible Books', 'Rare and antique books'),
+    ('Fine Art', 'Paintings, sculptures, and other art pieces'),
+    ('Jewelry & Watches', 'Vintage and antique jewelry'),
+    ('Furniture', 'Antique and vintage furniture'),
+    ('Musical Instruments', 'Historic musical instruments')
+ON CONFLICT (name) DO NOTHING;
 
 -- Insert sample data for testing
-INSERT INTO users (username, password_hash, wallet_address, miner_name) VALUES
-    ('founding_miner_1', SHA256('password123'), 'RTC1FoundingMiner1WalletAddress123456', 'Founding Miner Alpha'),
-    ('founding_miner_2', SHA256('password123'), 'RTC1FoundingMiner2WalletAddress123456', 'Founding Miner Beta'),
-    ('founding_miner_3', SHA256('password123'), 'RTC1FoundingMiner3WalletAddress123456', 'Founding Miner Gamma');
+INSERT INTO users (username, email, password_hash, role, bio) VALUES
+    ('relic_master', 'admin@rustchain.io', sha256('admin123'::text), 'admin', 'Official RustChain admin account'),
+    ('ancient_collector', 'collector@example.com', sha256('password123'::text), 'user', 'Passionate about ancient artifacts'),
+    ('vintage_lover', 'vintage@example.com', sha256('password123'::text), 'user', 'Victorian era enthusiast')
+ON CONFLICT (username) DO NOTHING;
 
--- Insert sample mining sessions
-INSERT INTO mining_sessions (user_id, miner_name, start_time, end_time, blocks_found, rewards_earned, status) VALUES
-    (1, 'Founding Miner Alpha', NOW() - INTERVAL '7 days', NOW() - INTERVAL '6 days', 5, 150.0, 'completed'),
-    (1, 'Founding Miner Alpha', NOW() - INTERVAL '5 days', NOW() - INTERVAL '4 days', 3, 90.0, 'completed'),
-    (2, 'Founding Miner Beta', NOW() - INTERVAL '3 days', NOW() - INTERVAL '2 days', 8, 240.0, 'completed'),
-    (3, 'Founding Miner Gamma', NOW() - INTERVAL '1 day', NULL, 2, 0, 'active');
-
--- Insert sample rewards
-INSERT INTO rewards (user_id, session_id, amount, notes) VALUES
-    (1, 1, 150.0, 'Block rewards from session 1'),
-    (1, 2, 90.0, 'Block rewards from session 2'),
-    (2, 3, 240.0, 'Block rewards from session 3');
-
--- Insert sample pool stats
-INSERT INTO pool_stats (total_miners, active_sessions, total_hashrate, blocks_found_24h, rewards_distributed_24h) VALUES
-    (3, 1, 1500.50, 12, 360.0);
+INSERT INTO relics (owner_id, name, description, category, daily_rate, deposit_amount, condition, status, location) VALUES
+    (1, 'Roman Bronze Coin Collection', 'Authentic Roman bronze coins from 100-300 AD. Set of 10 coins in excellent condition.', 'Ancient Artifacts', 50.00, 500.00, 'excellent', 'available', 'Beijing, China'),
+    (1, 'Medieval Sword Replica', 'High-quality replica of a 14th century knight sword. Museum-grade craftsmanship.', 'Medieval Relics', 75.00, 800.00, 'excellent', 'available', 'Shanghai, China'),
+    (1, 'Victorian Pocket Watch', 'Original 1880s Swiss pocket watch with gold casing. Fully functional.', 'Victorian Era', 100.00, 1000.00, 'good', 'available', 'Guangzhou, China'),
+    (1, '1920s Art Deco Lamp', 'Beautiful bronze Art Deco table lamp with original shade.', 'Art Deco', 40.00, 400.00, 'good', 'available', 'Shenzhen, China'),
+    (1, 'Vintage Typewriter', '1940s Royal Quiet De Luxe portable typewriter. Fully restored and working.', 'Vintage Technology', 35.00, 350.00, 'excellent', 'available', 'Hangzhou, China');

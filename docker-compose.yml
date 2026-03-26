@@ -1,97 +1,102 @@
 version: '3.8'
 
 services:
-  # Founding Miner API
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: founding-miner-api
-    restart: unless-stopped
+  # Rent-a-Relic Market API
+  market-api:
+    image: python:3.11-slim
+    container_name: rustchain-market-api
+    working_dir: /app
+    volumes:
+      - ./app:/app
+      - ./requirements.txt:/app/requirements.txt
+    command: >
+      bash -c "pip install -r requirements.txt &&
+               python app.py"
     ports:
       - "5000:5000"
     environment:
-      - DATABASE_URL=postgresql://founding_miner:founding_miner_password@postgres:5432/founding_miner
+      - FLASK_ENV=production
+      - DATABASE_URL=postgresql://rustchain:${POSTGRES_PASSWORD}@postgres:5432/rustchain_market
+      - SECRET_KEY=${SECRET_KEY}
       - REDIS_URL=redis://redis:6379/0
-      - JWT_SECRET=${JWT_SECRET:-founding-miner-secret-change-in-production}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-    networks:
-      - founding-miner-network
+        condition: service_started
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.founding-miner.rule=Host(`founding-miner.localhost`)"
-      - "traefik.http.services.founding-miner.loadbalancer.server.port=5000"
+      start_period: 40s
+    networks:
+      - rustchain-network
+    restart: unless-stopped
 
   # PostgreSQL Database
   postgres:
-    image: postgres:16.4-alpine
-    container_name: founding-miner-postgres
-    restart: unless-stopped
+    image: postgres:16.4
+    container_name: rustchain-market-db
     environment:
-      - POSTGRES_DB=founding_miner
-      - POSTGRES_USER=founding_miner
-      - POSTGRES_PASSWORD=founding_miner_password
+      - POSTGRES_USER=rustchain
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=rustchain_market
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init-db:/docker-entrypoint-initdb.d:ro
-    networks:
-      - founding-miner-network
+      - ./init-db:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U founding_miner -d founding_miner"]
+      test: ["CMD-SHELL", "pg_isready -U rustchain -d rustchain_market"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+    networks:
+      - rustchain-network
+    restart: unless-stopped
 
   # Redis Cache
   redis:
     image: redis:7.4-alpine
-    container_name: founding-miner-redis
-    restart: unless-stopped
+    container_name: rustchain-market-redis
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-    networks:
-      - founding-miner-network
+    ports:
+      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 5s
+    networks:
+      - rustchain-network
+    restart: unless-stopped
 
   # Nginx Reverse Proxy
   nginx:
     image: nginx:1.25.4-alpine
-    container_name: founding-miner-nginx
-    restart: unless-stopped
-    ports:
-      - "8080:80"
+    container_name: rustchain-market-nginx
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    ports:
+      - "80:80"
+      - "443:443"
     depends_on:
-      - api
-    networks:
-      - founding-miner-network
+      - market-api
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - rustchain-network
+    restart: unless-stopped
 
 networks:
-  founding-miner-network:
+  rustchain-network:
     driver: bridge
 
 volumes:
