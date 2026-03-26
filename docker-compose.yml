@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # Founding Miner API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: founding-miner-api
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgresql://founding_miner:founding_miner_password@postgres:5432/founding_miner
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=${JWT_SECRET:-founding-miner-secret-change-in-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - founding-miner-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.founding-miner.rule=Host(`founding-miner.localhost`)"
+      - "traefik.http.services.founding-miner.loadbalancer.server.port=5000"
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16.4-alpine
+    container_name: founding-miner-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=founding_miner
+      - POSTGRES_USER=founding_miner
+      - POSTGRES_PASSWORD=founding_miner_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    networks:
+      - founding-miner-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U founding_miner -d founding_miner"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Redis Cache
+  redis:
+    image: redis:7.4-alpine
+    container_name: founding-miner-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - founding-miner-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:1.25.4-alpine
+    container_name: founding-miner-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - api
+    networks:
+      - founding-miner-network
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  founding-miner-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
