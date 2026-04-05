@@ -1,5 +1,5 @@
 # Cross-compilation configuration for RustChain Miner
-# Supports RISC-V and other architectures
+# Supports RISC-V, SH-4 (Sega Dreamcast) and other architectures
 
 [build]
 # Default target (can be overridden via CLI)
@@ -23,6 +23,19 @@ env.passthrough = [
     "PKG_CONFIG_ALLOW_CROSS=1",
     "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_LINKER=riscv64-linux-musl-gcc",
 ]
+
+# SH-4 (Sega Dreamcast) - Released 1998
+# Uses Hitachi SH-4 CPU (SH7750R/SH7751R)
+[target.sh4-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/sh4-unknown-linux-gnu:main"
+pre-build = ["./scripts/cross-pre-build-sh4.sh"]
+env.passthrough = [
+    "OPENSSL_INCLUDE_DIR=/usr/include/openssl",
+    "OPENSSL_LIB_DIR=/usr/lib/sh4-linux-gnu",
+    "PKG_CONFIG_ALLOW_CROSS=1",
+    "CARGO_TARGET_SH4_UNKNOWN_LINUX_GNU_LINKER=sh4-linux-gnu-gcc",
+]
+env.vars = { CARGO_TARGET_SH4_UNKNOWN_LINUX_GNU_RUNNER = "qemu-sh4 -L /usr/sh4-linux-gnu" }
 
 # Additional architectures for reference
 [target.aarch64-unknown-linux-gnu]

@@ -161,6 +161,20 @@ fn detect_cpu_family_arch(cpu: &str, machine: &str) -> (String, String) {
         return ("RISC-V".to_string(), "Generic".to_string());
     }
 
+    // SH-4 (Sega Dreamcast) - Released 1998
+    if machine.contains("sh4") || cpu_lower.contains("sh-4") || cpu_lower.contains("sh4") {
+        if cpu_lower.contains("sh7750") || cpu_lower.contains("sh7750r") {
+            return ("SH-4".to_string(), "Hitachi SH-7750R".to_string());
+        } else if cpu_lower.contains("sh7751") || cpu_lower.contains("sh7751r") {
+            return ("SH-4".to_string(), "Hitachi SH-7751R".to_string());
+        } else if cpu_lower.contains("dreamcast") {
+            return ("SH-4".to_string(), "Sega Dreamcast".to_string());
+        } else if cpu_lower.contains("saturn") {
+            return ("SH-4".to_string(), "Sega Saturn (SH-2)".to_string());
+        }
+        return ("SH-4".to_string(), "Hitachi SH-4".to_string());
+    }
+
     // Apple Silicon (M1/M2/M3/M4)
     if machine == "aarch64" || machine == "arm64" {
         if cpu_lower.contains("m4") {

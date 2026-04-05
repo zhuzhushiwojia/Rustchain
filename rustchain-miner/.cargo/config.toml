@@ -53,9 +53,20 @@ rustflags = ["-C", "link-arg=-Wl,--allow-multiple-definition"]
 linker = "s390x-linux-gnu-gcc"
 rustflags = ["-C", "link-arg=-Wl,--allow-multiple-definition"]
 
+# SH-4 (Sega Dreamcast) target configuration
+# Hitachi SH-4 CPU (SH7750R/SH7751R)
+[target.sh4-unknown-linux-gnu]
+linker = "sh4-linux-gnu-gcc"
+rustflags = [
+    "-C", "link-arg=-Wl,--allow-multiple-definition",
+    "-C", "target-feature=+fpu",
+    "-C", "target-cpu=sh7750",
+]
+
 # Helper aliases
 [alias]
 build-riscv = "build --target riscv64gc-unknown-linux-gnu"
 build-riscv-musl = "build --target riscv64gc-unknown-linux-musl"
+build-dreamcast = "build --target sh4-unknown-linux-gnu"
 build-arm64 = "build --target aarch64-unknown-linux-gnu"
 build-x86_64 = "build --target x86_64-unknown-linux-gnu"
